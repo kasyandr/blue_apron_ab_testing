@@ -1,0 +1,325 @@
+---
+title: "Blue Apron"
+author: "Andrey Kasyanov"
+date: "December 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=1, digits=8)
+```
+
+```{r, eval=TRUE, warning=FALSE}
+library(data.table)
+library(tidyverse)
+library(lfe)
+library(ggplot2)
+library(stargazer)
+```
+
+* Experimental design:
+Diff in diff experiment
+We measure profit-defining factors of 3 periods: pre treatment, during treatment and after treatment, 2 months for each period.
+Locations: Boston / Chicago
+Duration: 2 + 2 + 2 months
+Treatment: Adding or similar priced vegetarian friendly-items in addition to meal kits in boxes of treatment group. Boston is treatment, Chicago is control
+Outcome variables: Revenue and Profit
+
+```{r, eval=TRUE, warning=FALSE}
+num_obj <- 1000
+boston <- rbinom(num_obj, 1, prob = .5)
+#population samples for boston and chicago
+num_bos <- sum(boston)
+num_chi <- num_obj - num_bos
+# Boston: Treatment Group / Chicago: Control Group
+free_salad <- boston
+```
+
+Blue apron offers two meal plans, family and 2-person. Though we have not been able to get exact distribution, BA's revenue statements suggests most people stick with 2 person plan, as on average a customer brings in 250$/month revenue, which is a month's worth of 2 person plan ($59.94/week), compared to family's plan ($71.92/week)
+
+```{r, eval=TRUE, warning=FALSE}
+# cost function
+randomCost <- function(n, m, sd) rnorm(n, m, sd)
+randomError <- function(n, m, sd) rnorm(n, m, sd)
+
+#treatment and control populations 
+pre_treat_num <- rnorm(num_bos, 3, 1)
+pre_control_num <- rnorm(num_chi, 3, 1)
+
+#revenue is fixed for both control and treatment as it is a price per box
+pre_treat_revenue <- pre_treat_num * 60
+pre_control_revenue <- pre_control_num * 60
+
+# cost
+cost_mean <- 43
+cost_sd <- 2
+pre_cost <- randomCost(num_obj, cost_mean, cost_sd) + randomError(num_obj, 0, 1)
+#profit is not fixed, as it includes the cost of including a salad
+
+#treat_profit <- treat_num * #find profit
+#control_profit <- treat_num * #find profit -3
+
+t <- 0
+c <- 0
+pre_revenue <- vector()
+pre_profit <- vector()
+
+# merge since we have 3 periods, this function maps pre treatment values for control and treatment values.
+for(i in boston){
+  if(i == 1) {
+    t <- t + 1
+    pre_revenue <- c(pre_revenue, pre_treat_revenue[t])
+    pre_profit <- c(pre_profit, pre_treat_revenue[t] - (pre_treat_num[t] * pre_cost[t+c]))
+  } else {
+    c <- c + 1
+    pre_revenue <- c(pre_revenue, pre_control_revenue[c])
+    pre_profit <- c(pre_profit, pre_control_revenue[c] - (pre_control_num[c] * pre_cost[t+c]))
+  }
+}
+```
+
+```{r, eval=TRUE, warning=FALSE}
+#treatment and control populations 
+during_treat_num <- rnorm(num_bos, 6, 1)
+during_control_num <- rnorm(num_chi, 3, 1)
+
+#revenue is fixed for both control and treatment as it is a price per box
+during_treat_revenue <- during_treat_num * 60
+during_control_revenue <- during_control_num * 60
+
+# cost
+# We have calculated approximate profit margin per box per person to be approximately 25%. Therefore the cost is around 75%, around $43
+cost_mean <- 43
+cost_sd <- 3
+during_cost <- randomCost(num_obj, cost_mean, cost_sd) + randomError(num_bos, 0, 1)
+salad_cost <- 3
+
+
+t <- 0
+c <- 0
+during_revenue <- vector()
+during_profit <- vector()
+
+#This function maps treatment time profit for control and treatment populations.
+
+for(i in boston){
+  if(i == 1) {
+    t <- t + 1
+    during_revenue <- c(during_revenue, during_treat_revenue[t])
+    during_profit <- c(during_profit, during_treat_revenue[t] - (during_treat_num[t] * during_cost[t+c]) - (during_treat_num[t] * salad_cost))
+  } else {
+    c <- c + 1
+    during_revenue <- c(during_revenue, during_control_revenue[c])
+    during_profit <- c(during_profit, during_control_revenue[c] - (during_control_num[c] * during_cost[t+c]))
+  }
+}
+```
+
+```{r, eval=TRUE, warning=FALSE}
+#treatment and control populations 
+after_treat_num <- rnorm(num_bos, 4, 1.5)
+after_control_num <- rnorm(num_chi, 3, 1)
+
+#revenue is fixed for both control and treatment as it is a price per box
+after_treat_revenue <- after_treat_num * 60
+after_control_revenue <- after_control_num * 60
+
+# cost
+cost_mean <- 43
+cost_sd <- 2
+after_cost <- randomCost(num_obj, cost_mean, cost_sd) + randomError(num_bos, 0, 1)
+#profit is not fixed, as it includes the cost of including a salad
+
+#treat_profit <- treat_num * #find profit
+#control_profit <- treat_num * #find profit -3
+
+t <- 0
+c <- 0
+after_revenue <- vector()
+after_profit <- vector()
+# This function maps post treatment values for control and treatment populations. 
+for(i in boston){
+  if(i == 1) {
+    t <- t + 1
+    after_revenue <- c(after_revenue, after_treat_revenue[t])
+    after_profit <- c(after_profit, after_treat_revenue[t] - (after_treat_num[t] * after_cost[t+c]))
+  } else {
+    c <- c + 1
+    after_revenue <- c(after_revenue, after_control_revenue[c])
+    after_profit <- c(after_profit, after_control_revenue[c] - (after_control_num[c] * after_cost[t+c]))
+  }
+}
+```
+
+```{r, eval=TRUE, warning=FALSE}
+# covariates
+# veg
+#According to national us census, vegetarian's occupy around 6% of population, so it is a valid assumption that this distribution is similar in large random sample.
+#BA has same pricing for vegetarian and non vegetarian options, so the mean rvenue does not change much. However as it is generally more expensive and taxing to be #vegetarian when it comes to dietary requirement and compensating for lack of animal products, we believe that BA's boxes might present an easier alternative for them.
+
+veg <- rbinom(num_obj, 1, prob = .06)
+
+#referred by a friend
+#we found that approximately 34% of blue apron's new customers were acquired by the word of mouth (referals), hence it is worth testing for the impact of including free salad on referals
+#Since one person can refer multiple people and get a discount, we use a dummy variable for it. This helps us to avoid complications associated with discounts from referals, which apply if a person refered more than one of their acquaintances.
+pre_ref <- rbinom(num_obj, 1, prob = .34)
+during_ref <- rbinom(num_obj, 1, prob = .34)
+after_ref <- rbinom(num_obj, 1, prob = .34)
+
+# age
+# We used Blue Apron's customers' age data for our distribution
+rollAge <- function(n) sample(1:100,n,replace=T)
+
+ageDist <- rollAge(num_obj)
+
+age <- vector()
+#for our regression we plan using 6 age groups to see which groups has more impact on the profits.
+for (j in ageDist) {
+  if (j < 4) {
+    age <- c(age, '18-24')
+  } else if (j < 40) {
+    age <- c(age, '25-34')
+  } else if (j < 65) {
+    age <- c(age, '35-44')
+  } else if (j < 82) {
+    age <- c(age, '45-54')
+  } else if (j < 95) {
+    age <- c(age, '55-64')
+  } else {
+    age <- c(age, '65-99')
+  } 
+}
+
+
+
+#summary table 
+blue_apron <- data.table(
+  id = 1:num_obj,
+  boston = boston,
+  free_salad = free_salad,
+  pre_revenue = pre_revenue,
+  pre_profit = pre_profit,
+  during_revenue = during_revenue,
+  during_profit = during_profit,
+  after_revenue = after_revenue,
+  after_profit = after_profit,
+  veg = veg,
+  pre_ref = pre_ref,
+  during_ref = during_ref,
+  after_ref = after_ref,
+  age = age
+)
+
+blue_apron
+```
+
+```{r, eval=TRUE, warning=FALSE}
+period <- vector()
+profit <- vector()
+revenue <- vector()
+treat <- vector()
+ref <- vector()
+#regressions and analysis
+#this allows us to separate variables into True and False, originally we had encountered an issue of the graph displaying treatment and controls as continious values between 0 and 1, even though we only had 0 and 1, nothing in between.
+for(i in free_salad){
+  if(i==1){
+    treat <- c(treat, "TRUE")
+  } else {
+    treat <- c(treat, "FALSE")
+  }
+}
+#this function goes through the data set, mapping profit on a graph.
+for(i in pre_profit){
+  period <- c(period, 0)
+  profit <- c(profit, log10(i))
+}
+for(i in during_profit){
+  period <- c(period, 1)
+  profit <- c(profit, log10(i))
+}
+for(i in after_profit){
+  period <- c(period, 2)
+  profit <- c(profit, log10(i))
+}
+
+for(i in pre_revenue){
+  revenue <- c(revenue, log10(i))
+}
+for(i in during_revenue){
+  revenue <- c(revenue, log10(i))
+}
+for(i in after_revenue){
+  revenue <- c(revenue, log10(i))
+}
+
+for(i in pre_ref){
+  ref <- c(ref, i)
+}
+for(i in during_ref){
+  ref <- c(ref, i)
+}
+for(i in after_ref){
+  ref <- c(ref, i)
+}
+
+
+dt <- cbind(period, profit)
+dt <- cbind(dt, revenue)
+dt <- cbind(dt, ref)
+dt <- cbind(dt, treat)
+dt <- data.table(dt)
+colnames(dt) <- c("period", "profit", "revenue", "referring", "treat")
+dt
+```
+```{r}
+#graph on the value of profitabilty and influences of free salad inclusion.
+aprn_diff_profit_plot <- ggplot(dt, aes(x=period, y=as.numeric(profit), group = treat)) + geom_smooth(aes(color=treat)) + geom_point(aes(color=treat)) + labs(y="profit (log10)")
+aprn_diff_profit_plot
+```
+
+```{r}
+#graph on the value of revenue and influences of free salad inclusion.
+aprn_diff_rev_plot <- ggplot(dt, aes(x=period, y=as.numeric(revenue), group = treat)) + geom_smooth(aes(color=treat)) + geom_point(aes(color=treat)) + labs(y="revenue (log10)")
+aprn_diff_rev_plot
+```
+
+```{r}
+#regression on the value of profitabilty and influences of free salad inclusion with age as covariate, diet as fixed effects
+during_pre_profit <- felm(during_profit-pre_profit ~ free_salad + age | veg, blue_apron)
+after_pre_profit <- felm(after_profit-pre_profit ~ free_salad + age | veg, blue_apron)
+after_during_profit <- felm(after_profit-during_profit ~ free_salad + age | veg, blue_apron)
+stargazer(during_pre_profit, after_pre_profit, after_during_profit, type = 'text')
+```
+
+```{r}
+#regression on the value of profitabilty and influences of free salad inclusion with diet as covariate, age as fixed effect
+during_pre_profit <- felm(during_profit-pre_profit ~ free_salad + veg | age, blue_apron)
+after_pre_profit <- felm(after_profit-pre_profit ~ free_salad + veg | age, blue_apron)
+after_during_profit <- felm(after_profit-during_profit ~ free_salad + veg | age, blue_apron)
+stargazer(during_pre_profit, after_pre_profit, after_during_profit, type = 'text')
+```
+
+
+
+
+```{r}
+#regression on the value of revenue and influences of free salad inclusion with age as covariate, diet as fixed effect
+during_pre_revenue <- felm(during_revenue-pre_revenue ~ free_salad + age | veg, blue_apron)
+after_pre_revenue <- felm(after_revenue-pre_revenue ~ free_salad + age | veg, blue_apron)
+after_during_revenue <- felm(after_revenue-during_revenue ~ free_salad + age | veg, blue_apron)
+stargazer(during_pre_revenue, after_pre_revenue, after_during_revenue, type = 'text')
+```
+```{r}
+#regression on the number of referrals and influences of free salad inclusion with age as covariate, die as fixed effect
+after_pre_referred <- felm(after_ref-pre_ref ~ free_salad + age | veg, blue_apron)
+after_during_referred <- felm(after_ref-during_ref ~ free_salad + age | veg, blue_apron)
+during_pre_referred <- felm(during_ref-pre_ref ~ free_salad + age | veg, blue_apron)
+
+stargazer(during_pre_referred, after_pre_referred, after_during_referred, type = 'text')
+```
+```{r}
+#balance test to ensure parallel trends
+balance_test <- felm(pre_profit ~ free_salad, data = blue_apron)
+summary(balance_test)
+```
